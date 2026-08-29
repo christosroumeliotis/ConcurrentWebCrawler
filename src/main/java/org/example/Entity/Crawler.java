@@ -82,7 +82,7 @@ public class Crawler {
             if (response.statusCode() == 200) {
                 System.out.println(Thread.currentThread().getName() + " Page downloaded successfully!");
                 Files.writeString(
-                        Path.of("page.html"),
+                        Path.of(Thread.currentThread().getName() + "page.html"),
                         response.body()
                 );
                 System.out.println(Thread.currentThread().getName() + " Page saved successfully!");
