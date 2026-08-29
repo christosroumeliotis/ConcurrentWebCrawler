@@ -3,7 +3,6 @@ package org.example.Entity;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
 import java.awt.*;
 import java.io.File;
@@ -16,38 +15,56 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Crawler {
+
+    private final Queue<String> queue = new LinkedList<>();
+    private static final int QUEUE_CAPACITY = 5;
+
+    private AtomicInteger globalUrlsProduced = new AtomicInteger(0);
+
 
     private final Set<String> linksFound = new HashSet<>();
     private final Set<String> linksVisited = new HashSet<>();
 
     public void crawl (String url) {
         downloadPage(url);
-        extractLinks(url);
-        visitLinks();
+        Set<String> linksFoundInThread = extractLinks(url);
+        visitLinks(linksFoundInThread, url);
     }
 
-    private void visitLinks() {
-        for (String link : linksFound) {
+    private void visitLinks(Set<String> linksFoundInThread, String url) {
+        Set<String> linksVisitedInThread = new HashSet<>();
+        for (String link : linksFoundInThread) {
             URI uri;
             try {
                 uri = new URI(link);
                 if (Desktop.isDesktopSupported()) {
                     //Desktop.getDesktop().browse(uri);
-                    linksVisited.add(link);
+                    linksVisitedInThread.add(link);
                 }
             } catch (URISyntaxException e) {
                 throw new RuntimeException(e);
             }
         }
-        System.out.println(Thread.currentThread().getName() + " Visited links: " + linksVisited.size());
+        linksVisited.addAll(linksVisitedInThread);
+        System.out.println(Thread.currentThread().getName() + " visited links: " + linksVisitedInThread.size() + ", total links visited: " + linksVisited.size());
+
+        Path path = Path.of("pages_loaded/" + URI.create(url).getHost() + ".html");
+        try {
+            Files.delete(path);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    private void extractLinks(String url) {
-
-        File file = new File("page.html");
+    private Set<String> extractLinks(String url) {
+        Set<String> linksFoundInThread;
+        File file = new File("pages_loaded/" + URI.create(url).getHost() + ".html");
         Document doc;
         try {
             doc = Jsoup.parse(file, "UTF-8", url);
@@ -55,6 +72,7 @@ public class Crawler {
             throw new RuntimeException(e);
         }
 
+        linksFoundInThread = new HashSet<>();
         for (Element link : doc.select("a[href]")) {
             String href = link.attr("href");
             if (href.isEmpty() || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) {
@@ -62,9 +80,12 @@ public class Crawler {
             }
 
             String fullUrl = URI.create(url).resolve(href).toString();
-            linksFound.add(fullUrl);
+            linksFoundInThread.add(fullUrl);
         }
-        System.out.println(Thread.currentThread().getName() + " Found links: " + linksFound.size());
+        linksFound.addAll(linksFoundInThread);
+        System.out.println(Thread.currentThread().getName() + " found links: " + linksFoundInThread.size() + ", total links found: " + linksFound.size());
+
+        return linksFoundInThread;
     }
 
     private void downloadPage(String url) {
@@ -80,12 +101,12 @@ public class Crawler {
             System.out.println(Thread.currentThread().getName() + " Status code returned: " + response.statusCode());
 
             if (response.statusCode() == 200) {
-                System.out.println(Thread.currentThread().getName() + " Page downloaded successfully!");
+                Path directory = Path.of("pages_loaded");
+                Files.createDirectories(directory);
                 Files.writeString(
-                        Path.of(Thread.currentThread().getName() + "page.html"),
+                        Path.of( "pages_loaded/" + request.uri().getHost() + ".html"),
                         response.body()
                 );
-                System.out.println(Thread.currentThread().getName() + " Page saved successfully!");
             } else {
                 throw new RuntimeException(Thread.currentThread().getName() + " Failed to download or save the page!");
             }
@@ -93,5 +114,35 @@ public class Crawler {
             throw new RuntimeException(e);
         }
 
+    }
+
+    public void produce(String url) throws InterruptedException {
+        synchronized (queue){
+            while (queue.size() == QUEUE_CAPACITY) {
+                queue.wait();
+            }
+            queue.add(url);
+            globalUrlsProduced.addAndGet(1);
+            queue.notifyAll();
+            System.out.println(Thread.currentThread().getName() + " produced: " + globalUrlsProduced + " URLs");
+
+        }
+    }
+
+    public void consume() throws InterruptedException {
+        synchronized (queue) {
+            while (queue.isEmpty()) {
+                queue.wait();
+            }
+            String url = queue.remove();
+            queue.notifyAll();
+            System.out.println(Thread.currentThread().getName() + " consumed: " + url);
+            try {
+                crawl(url);
+            } catch (Exception e) {
+                System.err.println("Failed for url: " + url);
+            }
+
+        }
     }
 }
