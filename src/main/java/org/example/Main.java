@@ -2,49 +2,54 @@ package org.example;
 
 import org.example.Entity.Crawler;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class Main {
 
     public static void main(String[] args) {
 
+        int processors = Runtime.getRuntime().availableProcessors();
+
+        System.out.println("Available processors: " + processors);
+
         Crawler crawler = new Crawler();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        ExecutorService executorServiceProducer = Executors.newFixedThreadPool(15);
 
-        Thread producer = new Thread(() -> {
-            try {
-                for (String url : DB.urls ){
-                    crawler.produce(url);
-                }
-                System.out.println("Producing completed!");
-                Thread.currentThread().interrupt();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+        Set<String> produced = ConcurrentHashMap.newKeySet();
+
+        for (String url : DB.urls) {
+            final String u = url;
+            if (produced.add(u)) {
+                executorServiceProducer.submit(() -> {
+                    try {
+                        crawler.produce(u);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
             }
-        }, "Producer");
+        }
 
-
-        Thread consumer = new Thread(() -> {
-            try {
-                while (true) {
-                    crawler.consume();
+        for (int i = 0; i < 3; i++) {
+            executorService.execute(() -> {
+                try {
+                    while (true) {
+                        crawler.consume();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }, "Consumer 1");
+            });
+        }
 
-        Thread consumer2 = new Thread(() -> {
-            try {
-                while (true) {
-                    crawler.consume();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }, "Consumer 2");
+        executorServiceProducer.shutdown();
+        executorService.shutdown();
 
-        producer.start();
-        consumer.start();
-        consumer2.start();
-//        Crawler crawler = new Crawler();
+        //        Crawler crawler = new Crawler();
 //
 //        Thread thread3 = new Thread(new Crawl(crawler ,"https://www.theodinproject.com/"), "Thread-1");
 //        Thread thread1 = new Thread(new Crawl(crawler ,"https://leetcode.com/"), "Thread-2");

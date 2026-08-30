@@ -14,16 +14,20 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Crawler {
 
-    private final Queue<String> queue = new LinkedList<>();
-    private static final int QUEUE_CAPACITY = 5;
+    private static final int QUEUE_CAPACITY = 10;
+    private final BlockingQueue<String> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
 
     private AtomicInteger globalUrlsProduced = new AtomicInteger(0);
 
@@ -92,13 +96,14 @@ public class Crawler {
         try(HttpClient client = HttpClient.newHttpClient()) {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
             HttpResponse<String> response =
                     client.send(request, HttpResponse.BodyHandlers.ofString());
 
-            System.out.println(Thread.currentThread().getName() + " Status code returned: " + response.statusCode());
+            //System.out.println(Thread.currentThread().getName() + " Status code returned: " + response.statusCode());
 
             if (response.statusCode() == 200) {
                 Path directory = Path.of("pages_loaded");
@@ -117,32 +122,18 @@ public class Crawler {
     }
 
     public void produce(String url) throws InterruptedException {
-        synchronized (queue){
-            while (queue.size() == QUEUE_CAPACITY) {
-                queue.wait();
-            }
-            queue.add(url);
-            globalUrlsProduced.addAndGet(1);
-            queue.notifyAll();
-            System.out.println(Thread.currentThread().getName() + " produced: " + globalUrlsProduced + " URLs");
-
-        }
+        queue.put(url);
+        globalUrlsProduced.addAndGet(1);
+        System.out.println(Thread.currentThread().getName() + " produced: " + globalUrlsProduced + " URLs");
     }
 
     public void consume() throws InterruptedException {
-        synchronized (queue) {
-            while (queue.isEmpty()) {
-                queue.wait();
-            }
-            String url = queue.remove();
-            queue.notifyAll();
-            System.out.println(Thread.currentThread().getName() + " consumed: " + url);
-            try {
-                crawl(url);
-            } catch (Exception e) {
-                System.err.println("Failed for url: " + url);
-            }
-
+        String url = queue.take();
+        System.out.println(Thread.currentThread().getName() + " consumed: " + url);
+        try {
+            crawl(url);
+        } catch (Exception e) {
+            System.err.println("Failed for url: " + url);
         }
     }
 }
