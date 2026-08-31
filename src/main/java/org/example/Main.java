@@ -17,7 +17,7 @@ public class Main {
 
         Crawler crawler = new Crawler();
         ExecutorService executorService = Executors.newCachedThreadPool();
-        ExecutorService executorServiceProducer = Executors.newFixedThreadPool(15);
+        ExecutorService executorServiceProducer = Executors.newFixedThreadPool(3);
 
         Set<String> produced = ConcurrentHashMap.newKeySet();
 

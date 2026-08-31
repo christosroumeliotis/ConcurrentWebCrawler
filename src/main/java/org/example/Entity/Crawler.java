@@ -1,5 +1,6 @@
 package org.example.Entity;
 
+import org.example.DB;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -23,11 +24,18 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Crawler {
 
     private static final int QUEUE_CAPACITY = 10;
-    private final BlockingQueue<String> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+    //private final BlockingQueue<String> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+    private final Queue<String> queue = new LinkedList<>();
+
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition empty = lock.newCondition();
+    private final Condition full = lock.newCondition();
 
     private AtomicInteger globalUrlsProduced = new AtomicInteger(0);
 
@@ -122,18 +130,34 @@ public class Crawler {
     }
 
     public void produce(String url) throws InterruptedException {
-        queue.put(url);
-        globalUrlsProduced.addAndGet(1);
-        System.out.println(Thread.currentThread().getName() + " produced: " + globalUrlsProduced + " URLs");
+        lock.lock();
+        try {
+            while (queue.size() == QUEUE_CAPACITY) {
+                full.await();
+            }
+            queue.add(url);
+            empty.signal();
+            globalUrlsProduced.addAndGet(1);
+            System.out.println(Thread.currentThread().getName() + " produced: " + globalUrlsProduced + " URLs");
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void consume() throws InterruptedException {
-        String url = queue.take();
+        lock.lock();
+        while (queue.isEmpty()){
+            empty.await();
+        }
+        String url = queue.poll();
+        full.signal();
         System.out.println(Thread.currentThread().getName() + " consumed: " + url);
         try {
             crawl(url);
         } catch (Exception e) {
             System.err.println("Failed for url: " + url);
+        } finally {
+            lock.unlock();
         }
     }
 }
